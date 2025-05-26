@@ -5,10 +5,10 @@ from google.adk.agents import Agent
 from google.adk.models.lite_llm import LiteLlm
 
 # https://docs.litellm.ai/docs/providers/openrouter
-model = LiteLlm(
-    model="openrouter/openai/gpt-4.1",
-    api_key=os.getenv("OPENROUTER_API_KEY"),
-)
+# model = LiteLlm(
+#     model="openrouter/openai/gpt-4.1",
+#     api_key=os.getenv("OPENROUTER_API_KEY"),
+# )
 
 
 def get_dad_joke():
@@ -20,10 +20,9 @@ def get_dad_joke():
     ]
     return random.choice(jokes)
 
-
 root_agent = Agent(
-    name="dad_joke_agent",
-    model=model,
+    name="tool_agent",
+    model="gemini-2.0-flash",
     description="Dad joke agent",
     instruction="""
     You are a helpful assistant that can tell dad jokes. 
@@ -31,3 +30,14 @@ root_agent = Agent(
     """,
     tools=[get_dad_joke],
 )
+
+# root_agent = Agent(
+#     name="dad_joke_agent",
+#     model=model,
+#     description="Dad joke agent",
+#     instruction="""
+#     You are a helpful assistant that can tell dad jokes. 
+#     Only use the tool `get_dad_joke` to tell jokes.
+#     """,
+#     tools=[get_dad_joke],
+# )
