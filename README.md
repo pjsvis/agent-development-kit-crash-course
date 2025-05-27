@@ -86,6 +86,9 @@ Leverage concurrent operations with parallel agents for improved efficiency and 
 ### 12. Loop Agent
 Build sophisticated agents that can iteratively refine their outputs through feedback loops.
 
+### 13. GitHub Agent
+Learn to build an agent that interacts with the GitHub API, allowing a chatbot to fetch repository information, issues, and more.
+
 ## Official Documentation
 
 For more detailed information, check out the official ADK documentation:
