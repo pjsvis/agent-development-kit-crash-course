@@ -1,37 +1,56 @@
 # agent.py
 from .config_loader import load_app_config
-from .github_client import list_repository_contents, read_repository_file, create_repository_file, update_repository_file, delete_repository_file # Ensure all necessary imports are present
+from .github_client import (
+    list_repository_contents,
+    read_repository_file,
+    create_repository_file,
+    update_repository_file,
+    delete_repository_file
+)
+import google.generativeai as genai
+from google.generativeai.types import HarmCategory, HarmBlockThreshold
+from google.generativeai.tools import Tool
 from github import Github, UnknownObjectException, BadCredentialsException # To install: pip install PyGithub
 
 class GithubAgent:
     """
-    Core agent for interacting with GitHub.
+    Core agent for interacting with GitHub, powered by an LLM.
     """
     def __init__(self, app_config: dict):
         """
         Initializes the GithubAgent.
 
         Args:
-            app_config (dict): Application configuration containing GITHUB_PAT and GITHUB_REPO_URL.
+            app_config (dict): Application configuration containing GITHUB_PAT, 
+                               GITHUB_REPO_URL, and GOOGLE_API_KEY.
         """
         self.app_config = app_config
         self.github_pat = app_config.get('GITHUB_PAT')
         self.repo_url = app_config.get('GITHUB_REPO_URL')
+        self.google_api_key = app_config.get('GOOGLE_API_KEY')
+
         self.github_client = None
         self.repository_object = None
+        self.llm_model = None
+        self.tools = []
+
+        if not self.google_api_key:
+            raise ValueError("GOOGLE_API_KEY not found in configuration. LLM features cannot be initialized.")
+        genai.configure(api_key=self.google_api_key)
+
 
     def initialize_client(self) -> bool:
         """
-        Initializes the GitHub client and fetches the repository object.
+        Initializes the GitHub client, fetches the repository object, and sets up LLM tools.
 
         Returns:
             bool: True if initialization was successful, False otherwise.
         """
         if not self.github_pat:
-            print("Error: GITHUB_PAT not found in configuration. Cannot initialize client.")
+            print("Error: GITHUB_PAT not found in configuration. Cannot initialize GitHub client.")
             return False
         if not self.repo_url:
-            print("Error: GITHUB_REPO_URL not found in configuration. Cannot initialize client.")
+            print("Error: GITHUB_REPO_URL not found in configuration. Cannot initialize GitHub client.")
             return False
 
         try:
@@ -45,6 +64,9 @@ class GithubAgent:
             print(f"Attempting to access repository: {repo_path}")
             self.repository_object = self.github_client.get_repo(repo_path)
             print(f"Successfully accessed repository: {self.repository_object.full_name}")
+            
+            # Initialize LLM and tools now that repository_object is available
+            self._initialize_llm_and_tools()
             return True
         except BadCredentialsException:
             print("Error: GitHub authentication failed. Check your GITHUB_PAT.")
@@ -52,7 +74,7 @@ class GithubAgent:
             return False
         except UnknownObjectException:
             print(f"Error: GitHub repository not found at '{self.repo_url}'. Check the GITHUB_REPO_URL.")
-            self.github_client = None # Client might be valid, but repo is not
+            self.github_client = None 
             self.repository_object = None
             return False
         except Exception as e:
@@ -61,220 +83,222 @@ class GithubAgent:
             self.repository_object = None
             return False
 
-    def get_tools(self) -> list:
-        """Returns a list of tools available to the agent."""
-        return [] # Placeholder for ADK tools
+    def _initialize_llm_and_tools(self):
+        """Initializes the LLM and defines tools based on github_client functions."""
+        if not self.repository_object:
+            print("Error: Cannot initialize LLM tools without a repository object.")
+            return
 
-    def process_request(self, user_input: str) -> str:
-        """Processes a user request."""
-        if not self.github_client or not self.repository_object:
-            print("GitHub client or repository object not initialized. Attempting to initialize...")
-            if not self.initialize_client():
-                return "Error: GithubAgent client could not be initialized. Please check configuration and credentials."
-        
-        command_input = user_input.lower().strip()
-
-        if command_input.startswith("list files"):
-            # Simple parsing: "list files /path/to/dir" or "list files"
-            parts = user_input.strip().split(maxsplit=2) 
-            path_to_list = ""
-            if len(parts) > 2:
-                path_to_list = parts[2].strip()
-                # Remove leading/trailing slashes for consistency, as get_contents handles it
-                path_to_list = path_to_list.strip('/')
-
-            items, error = list_repository_contents(self.repository_object, path=path_to_list)
-
+        # --- Tool Wrapper Functions ---
+        def list_contents_tool_wrapper(path: str = "", branch: str = None) -> str:
+            """Lists files and directories in a specified path of the configured GitHub repository.
+            Args:
+                path (str, optional): The directory path within the repository. Defaults to the root.
+                branch (str, optional): The branch to query. Defaults to the repository's default branch.
+            """
+            print(f"LLM Tool Invoked: list_repository_contents(path='{path}', branch='{branch}')")
+            items, error = list_repository_contents(self.repository_object, path=path, branch=branch)
             if error:
                 return f"Error listing files: {error}"
             if not items:
-                return f"No items found in '{path_to_list if path_to_list else 'root directory'}' or path does not exist."
-            
-            response = f"Contents of '{path_to_list if path_to_list else 'root directory'}':\n"
-            for item_name in items:
-                response += f"- {item_name}\n"
-            return response.strip()
-        elif command_input.startswith("read file"):
-            parts = user_input.strip().split(maxsplit=2)
-            if len(parts) < 3:
-                return "Error: Please specify a file path to read. Usage: read file <path/to/file>"
-            
-            file_path_to_read = parts[2].strip().strip('/')
+                return f"No items found in '{path if path else 'root directory'}'."
+            return f"Contents of '{path if path else 'root directory'}':\n" + "\n".join([f"- {item}" for item in items])
 
-            content, error = read_repository_file(self.repository_object, file_path=file_path_to_read)
-
+        def read_file_tool_wrapper(file_path: str, branch: str = None) -> str:
+            """Reads the content of a specific file in the configured GitHub repository.
+            Args:
+                file_path (str): The full path to the file within the repository.
+                branch (str, optional): The branch to query. Defaults to the repository's default branch.
+            """
+            print(f"LLM Tool Invoked: read_repository_file(file_path='{file_path}', branch='{branch}')")
+            content, error = read_repository_file(self.repository_object, file_path=file_path, branch=branch)
             if error:
                 return f"Error reading file: {error}"
-            if content is None: # Should be caught by error, but as a safeguard
-                return f"Error: Could not retrieve content for '{file_path_to_read}' for an unknown reason."
-            
-            max_display_length = 2000 
+            if content is None:
+                return "Error: Could not retrieve content for an unknown reason."
+            max_display_length = 1500 
             if len(content) > max_display_length:
-                return f"Content of '{file_path_to_read}' (truncated to {max_display_length} chars):\n---\n{content[:max_display_length]}\n---\n... (file is longer)"
-            return f"Content of '{file_path_to_read}':\n---\n{content}\n---"
-        elif command_input.startswith("create file"):
-            # Command format: create file <filepath> <content for the file>
-            parts = user_input.strip().split(maxsplit=3)
-            if len(parts) < 4: # "create", "file", "<filepath>", "<content>"
-                return "Error: Insufficient arguments. Usage: create file <filepath> <content>"
-            
-            file_path_to_create = parts[2].strip().strip('/')
-            file_content = parts[3] # The rest of the string is content
-
-            if not file_path_to_create:
-                return "Error: File path for creation cannot be empty."
-
-            commit_message = f"Agent: Create new file '{file_path_to_create}'"
-
-            success, error = create_repository_file(
-                self.repository_object, 
-                file_path=file_path_to_create, 
-                commit_message=commit_message, 
-                content=file_content
-            )
-            if success:
-                return f"Successfully created file: '{file_path_to_create}'"
-            else:
+                return f"Content of '{file_path}' (truncated to {max_display_length} chars):\n---\n{content[:max_display_length]}\n---\n... (file is longer)"
+            return f"Content of '{file_path}':\n---\n{content}\n---"
+        
+        def create_file_tool_wrapper(file_path: str, content: str, commit_message: str = None, branch: str = None) -> str:
+            """Creates a new file in the configured GitHub repository.
+            Args:
+                file_path (str): The full path for the new file.
+                content (str): The content of the new file.
+                commit_message (str, optional): The commit message. Defaults to an agent-generated message.
+                branch (str, optional): The branch where the file will be created. Defaults to the repository's default branch.
+            """
+            print(f"LLM Tool Invoked: create_repository_file(file_path='{file_path}', commit_message='{commit_message}', branch='{branch}')")
+            if not commit_message:
+                commit_message = f"Agent LLM: Create new file '{file_path}'"
+            success, error = create_repository_file(self.repository_object, file_path=file_path, commit_message=commit_message, content=content, branch=branch)
+            if error:
                 return f"Error creating file: {error}"
-        elif command_input.startswith("update file"):
-             # Command format: update file <filepath> <new content for the file>
-            parts = user_input.strip().split(maxsplit=3)
-            if len(parts) < 4: # "update", "file", "<filepath>", "<new content>"
-                return "Error: Insufficient arguments. Usage: update file <filepath> <new content>"
-            
-            file_path_to_update = parts[2].strip().strip('/')
-            new_file_content = parts[3] # The rest of the string is new content
+            return f"Successfully created file: '{file_path}'"
 
-            if not file_path_to_update:
-                return "Error: File path for update cannot be empty."
-
-            # To update, we first need the file's current SHA
-            # We can reuse the read_repository_file logic to get the file object which contains the SHA
+        def update_file_tool_wrapper(file_path: str, new_content: str, commit_message: str = None, branch: str = None) -> str:
+            """Updates an existing file in the configured GitHub repository.
+            Args:
+                file_path (str): The full path of the file to update.
+                new_content (str): The new content for the file.
+                commit_message (str, optional): The commit message. Defaults to an agent-generated message.
+                branch (str, optional): The branch where the file will be updated. Defaults to the repository's default branch.
+            """
+            print(f"LLM Tool Invoked: update_repository_file(file_path='{file_path}', commit_message='{commit_message}', branch='{branch}')")
             try:
-                file_object = self.repository_object.get_contents(file_path_to_update, ref=self.repository_object.default_branch)
+                file_object = self.repository_object.get_contents(file_path.strip('/'), ref=branch or self.repository_object.default_branch)
                 if file_object.type == 'dir':
-                     return f"Error: Cannot update '{file_path_to_update}'. It is a directory, not a file."
+                     return f"Error: Cannot update '{file_path}'. It is a directory."
                 current_sha = file_object.sha
             except UnknownObjectException:
-                return f"Error: File '{file_path_to_update}' not found. Cannot update."
+                return f"Error: File '{file_path}' not found. Cannot update."
             except Exception as e:
-                return f"Error fetching file info for update: {e}"
+                return f"Error fetching file SHA for update: {e}"
 
-            commit_message = f"Agent: Update file '{file_path_to_update}'"
-
-            success, error = update_repository_file(
-                self.repository_object, 
-                file_path=file_path_to_update, 
-                commit_message=commit_message, 
-                new_content=new_file_content,
-                sha=current_sha
-            )
-            if success:
-                return f"Successfully updated file: '{file_path_to_update}'"
-            else:
+            if not commit_message:
+                commit_message = f"Agent LLM: Update file '{file_path}'"
+            success, error = update_repository_file(self.repository_object, file_path=file_path, commit_message=commit_message, new_content=new_content, sha=current_sha, branch=branch)
+            if error:
                 return f"Error updating file: {error}"
-        elif command_input.startswith("delete file"):
-            # Command format: delete file <filepath>
-            parts = user_input.strip().split(maxsplit=2)
-            if len(parts) < 3: # "delete", "file", "<filepath>"
-                return "Error: Please specify a file path to delete. Usage: delete file <filepath>"
-            
-            file_path_to_delete = parts[2].strip().strip('/')
+            return f"Successfully updated file: '{file_path}'"
 
-            if not file_path_to_delete:
-                return "Error: File path for deletion cannot be empty."
-
-            # To delete, we first need the file's current SHA
+        def delete_file_tool_wrapper(file_path: str, commit_message: str = None, branch: str = None) -> str:
+            """Deletes a file from the configured GitHub repository.
+            Args:
+                file_path (str): The full path of the file to delete.
+                commit_message (str, optional): The commit message. Defaults to an agent-generated message.
+                branch (str, optional): The branch from which the file will be deleted. Defaults to the repository's default branch.
+            """
+            print(f"LLM Tool Invoked: delete_repository_file(file_path='{file_path}', commit_message='{commit_message}', branch='{branch}')")
             try:
-                file_object = self.repository_object.get_contents(file_path_to_delete, ref=self.repository_object.default_branch)
+                file_object = self.repository_object.get_contents(file_path.strip('/'), ref=branch or self.repository_object.default_branch)
                 if file_object.type == 'dir':
-                     return f"Error: Cannot delete '{file_path_to_delete}'. It is a directory, not a file."
+                     return f"Error: Cannot delete '{file_path}'. It is a directory."
                 current_sha = file_object.sha
             except UnknownObjectException:
-                return f"Error: File '{file_path_to_delete}' not found. Cannot delete."
+                return f"Error: File '{file_path}' not found. Cannot delete."
             except Exception as e:
-                return f"Error fetching file info for deletion: {e}"
+                return f"Error fetching file SHA for deletion: {e}"
 
-            commit_message = f"Agent: Delete file '{file_path_to_delete}'"
-
-            success, error = delete_repository_file(
-                self.repository_object, 
-                file_path=file_path_to_delete, 
-                commit_message=commit_message, 
-                sha=current_sha
-            )
-            if success:
-                return f"Successfully deleted file: '{file_path_to_delete}'"
-            else:
+            if not commit_message:
+                commit_message = f"Agent LLM: Delete file '{file_path}'"
+            success, error = delete_repository_file(self.repository_object, file_path=file_path, commit_message=commit_message, sha=current_sha, branch=branch)
+            if error:
                 return f"Error deleting file: {error}"
-        else:
-            return f"GithubAgent (repo: {self.repo_url}) received: '{user_input}'. Command not recognized. Try 'list files [path]', 'read file <filepath>', 'create file <filepath> <content>', 'update file <filepath> <new content>', or 'delete file <filepath>'."
+            return f"Successfully deleted file: '{file_path}'"
+
+        self.tools = [
+            Tool.from_function(fn=list_contents_tool_wrapper, name="list_repository_contents", description="Lists files and directories in a specified path of the configured GitHub repository."),
+            Tool.from_function(fn=read_file_tool_wrapper, name="read_repository_file", description="Reads the content of a specific file in the configured GitHub repository."),
+            Tool.from_function(fn=create_file_tool_wrapper, name="create_repository_file", description="Creates a new file in the configured GitHub repository. Requires file_path and content. Commit message is optional."),
+            Tool.from_function(fn=update_file_tool_wrapper, name="update_repository_file", description="Updates an existing file in the configured GitHub repository. Requires file_path and new_content. Commit message is optional."),
+            Tool.from_function(fn=delete_file_tool_wrapper, name="delete_repository_file", description="Deletes a file from the configured GitHub repository. Requires file_path. Commit message is optional."),
+        ]
+        
+        self.llm_model = genai.GenerativeModel(
+            model_name="gemini-1.5-flash-latest", 
+            tools=self.tools,
+            safety_settings={
+                HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+                HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+                HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+                HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+            },
+            system_instruction=(
+                "You are a helpful GitHub assistant. You can interact with a GitHub repository "
+                "to list files, read files, create files, update files, and delete files. "
+                "When creating, updating, or deleting files, if the user doesn't provide a commit message, "
+                "you should generate a simple one like 'Agent LLM: [action] file [filename]'."
+            )
+        )
+        print("LLM and tools initialized successfully.")
+
+    def get_tools(self) -> list:
+        """Returns a list of tools available to the agent."""
+        return self.tools
+
+    def process_request(self, user_input: str) -> str:
+        """Processes a user request using the LLM and defined tools."""
+        if not self.llm_model: 
+            print("LLM model not initialized. Attempting to initialize GitHub client and LLM tools...")
+            if not self.initialize_client(): # This will also call _initialize_llm_and_tools
+                return "Error: GithubAgent client and LLM could not be initialized. Please check configuration and credentials."
+            if not self.llm_model: # Check again if LLM init failed within initialize_client
+                 return "Error: LLM model could not be initialized even after client setup."
+
+        try:
+            print(f"Sending to LLM: '{user_input}'")
+            # For multi-turn conversations, you would use:
+            # chat = self.llm_model.start_chat(enable_automatic_function_calling=True)
+            # response = chat.send_message(user_input)
+            # For single turn with automatic function calling:
+            response = self.llm_model.generate_content(
+                user_input,
+                # generation_config=genai.types.GenerationConfig(
+                #     # Only one candidate for now.
+                #     candidate_count=1) # Optional: if you want to force one candidate
+            )
+            
+            # The response.text should contain the final textual answer after tool calls.
+            # The genai library handles the loop of calling tools and feeding results back to the model.
+            if response.candidates and response.candidates[0].content.parts:
+                final_response_text = "".join(part.text for part in response.candidates[0].content.parts if hasattr(part, 'text'))
+                if final_response_text:
+                    print(f"LLM Response Text: {final_response_text.strip()}")
+                    return final_response_text.strip()
+                else:
+                    # This might happen if the LLM only made a function call and didn't provide subsequent text.
+                    # The ADK usually ensures a textual response after tool calls.
+                    # Let's check if there was a function call that might explain the empty text.
+                    for part in response.candidates[0].content.parts:
+                        if hasattr(part, 'function_call'):
+                            return f"LLM initiated a tool call: {part.function_call.name}. The tool's output should have been processed and a summary provided by the LLM. If no summary, this might indicate an issue or the tool call itself was the final action."
+                    return "LLM processed the request but returned no direct textual response. This might be normal if a tool was called and its output is the answer, or it could indicate an issue."
+            else:
+                # This could be due to safety settings blocking the response, or other issues.
+                print(f"LLM did not return a valid response structure. Prompt feedback: {response.prompt_feedback}")
+                return "LLM did not return a valid response. It might have been blocked or an error occurred."
+
+        except Exception as e:
+            print(f"Error during LLM processing or tool execution: {e}")
+            import traceback
+            traceback.print_exc() # For more detailed debugging
+            return f"An error occurred while processing your request with the LLM: {str(e)}"
 
 if __name__ == "__main__":
-    print("Testing GithubAgent...")
+    print("Testing GithubAgent with LLM integration...")
     try:
         config = load_app_config()
         agent = GithubAgent(app_config=config)
 
-        print("\n--- Test 1: List files in root ---")
-        response_root = agent.process_request("list files")
-        print(f"Agent Response (root): {response_root}")
-
-        print("\n--- Test 3: List files in a non-existent directory ---")
-        response_non_existent = agent.process_request("list files non_existent_dir_for_testing_123")
-        print(f"Agent Response (non_existent_dir): {response_non_existent}")
-
-        print("\n--- Test 4: Read a file (e.g., README.md if it exists) ---")
-        response_read_readme = agent.process_request("read file README.md") 
-        print(f"Agent Response (read README.md): {response_read_readme}")
-
-        print("\n--- Test 5: Read a non-existent file ---")
-        response_read_non_existent = agent.process_request("read file non_existent_file_for_testing_123.txt")
-        print(f"Agent Response (read non_existent_file): {response_read_non_existent}")
-
-        # --- Tests for Create, Update, Delete ---
-        # Define a unique file path for testing CUD operations
-        test_cud_file_path = "agent_test_cud/temp_file_by_agent.txt"
-        initial_content = "This is the initial content."
-        updated_content = "This content has been updated by the agent."
-
-        print(f"\n--- Test 6: Create a new file ('{test_cud_file_path}') ---")
-        # Note: This will actually create a file in your test repository.
-        # Ensure your GITHUB_PAT has write permissions.
-        response_create_file = agent.process_request(f"create file {test_cud_file_path} {initial_content}")
-        print(f"Agent Response (create file): {response_create_file}")
+        # Initialize client and LLM tools explicitly for testing if __name__ == "__main__"
+        if not agent.llm_model:
+            print("Initializing client and LLM for testing...")
+            if not agent.initialize_client():
+                print("Failed to initialize agent for testing. Exiting.")
+                exit()
         
-        # Only proceed with update/delete if creation was successful
-        if "Successfully created file" in response_create_file:
-            print(f"\n--- Test 7: Read the newly created file ('{test_cud_file_path}') ---")
-            response_read_new_file = agent.process_request(f"read file {test_cud_file_path}")
-            print(f"Agent Response (read new file): {response_read_new_file}")
-
-            print(f"\n--- Test 8: Update the file ('{test_cud_file_path}') ---")
-            response_update_file = agent.process_request(f"update file {test_cud_file_path} {updated_content}")
-            print(f"Agent Response (update file): {response_update_file}")
-
-            # Optional: Read again after update to verify
-            if "Successfully updated file" in response_update_file:
-                 print(f"\n--- Test 8b: Read the updated file ('{test_cud_file_path}') ---")
-                 response_read_updated_file = agent.process_request(f"read file {test_cud_file_path}")
-                 print(f"Agent Response (read updated file): {response_read_updated_file}")
-
-            print(f"\n--- Test 9: Delete the file ('{test_cud_file_path}') ---")
-            response_delete_file = agent.process_request(f"delete file {test_cud_file_path}")
-            print(f"Agent Response (delete file): {response_delete_file}")
-
-            # Optional: Try reading after delete to confirm it's gone
-            if "Successfully deleted file" in response_delete_file:
-                 print(f"\n--- Test 9b: Read the deleted file ('{test_cud_file_path}') ---")
-                 response_read_deleted_file = agent.process_request(f"read file {test_cud_file_path}")
-                 print(f"Agent Response (read deleted file): {response_read_deleted_file}")
-
-        else:
-            print(f"\nSkipping update and delete tests because file creation failed.")
+        print("\nAgent initialized. Run main.py to interact with the LLM-powered agent.")
+        print("Example queries you can try when running main.py:")
+        print("  - list files in the root directory")
+        print("  - what is in the src folder")
+        print("  - read the README.md file")
+        print("  - create a file named 'todo.txt' with content 'Buy milk'")
+        print("  - update the file 'todo.txt' and add 'Pay bills'")
+        print("  - delete the file 'todo.txt'")
+        
+        # Example of a direct test if needed (though interactive via main.py is better)
+        # print("\n--- Direct Test Example ---")
+        # test_query = "list files in the root"
+        # print(f"You: {test_query}")
+        # test_response = agent.process_request(test_query)
+        # print(f"CTX-GitHub: {test_response}")
 
 
     except (ValueError, FileNotFoundError) as e:
         print(f"Failed to load configuration for agent testing: {e}")
     except Exception as e:
         print(f"An unexpected error occurred during agent testing: {e}")
+        import traceback
+        traceback.print_exc()
