@@ -48,7 +48,7 @@ def list_repository_contents(repository_object, path: str = "", branch: str = No
         print(error_msg)
         return [], error_msg
     except GithubException as e: # Catch other PyGithub specific errors
-        error_msg = f"A GitHub API error occurred while listing repository contents for path '{normalized_path if normalized_path else '/'}': {e.data.get('message', str(e)) if hasattr(e, 'data') and isinstance(e.data, dict) else str(e)}"
+        error_msg = f"A GitHub API error occurred while listing repository contents for path '{normalized_path if normalized_path else '/'}': {e.status} - {e.data.get('message', str(e)) if hasattr(e, 'data') and isinstance(e.data, dict) else str(e)}"
         print(error_msg)
         return [], error_msg
     except Exception as e:
@@ -103,7 +103,7 @@ def read_repository_file(repository_object, file_path: str, branch: str = None) 
         print(error_msg)
         return None, error_msg
     except GithubException as e: # Catch other PyGithub specific errors
-        error_msg = f"A GitHub API error occurred while reading file '{normalized_file_path}': {e.data.get('message', str(e)) if hasattr(e, 'data') and isinstance(e.data, dict) else str(e)}"
+        error_msg = f"A GitHub API error occurred while reading file '{normalized_file_path}': {e.status} - {e.data.get('message', str(e)) if hasattr(e, 'data') and isinstance(e.data, dict) else str(e)}"
         print(error_msg)
         return None, error_msg
     except Exception as e:
@@ -111,8 +111,166 @@ def read_repository_file(repository_object, file_path: str, branch: str = None) 
         print(error_msg)
         return None, error_msg
 
+def create_repository_file(repository_object, file_path: str, commit_message: str, content: str, branch: str = None) -> tuple[bool, str | None]:
+    """
+    Creates a new file in a GitHub repository.
+
+    Args:
+        repository_object: An authenticated PyGithub Repository object.
+        file_path (str): The full path for the new file within the repository.
+        commit_message (str): The commit message for the file creation.
+        content (str): The content of the new file.
+        branch (str, optional): The name of the branch where the file will be created.
+                                Defaults to None, which means PyGithub will use
+                                the repository's default branch.
+
+    Returns:
+        tuple[bool, str | None]: A tuple containing:
+            - bool: True if the file was created successfully, False otherwise.
+            - str: An error message string if an error occurred, otherwise None.
+    """
+    if not repository_object:
+        return False, "Repository object is not initialized."
+    if not file_path:
+        return False, "File path cannot be empty."
+    if not commit_message:
+        return False, "Commit message cannot be empty."
+    # Content can be empty for an empty file.
+
+    try:
+        normalized_file_path = file_path.strip('/')
+        ref_to_use = branch if branch else repository_object.default_branch
+
+        print(f"Attempting to create file='{normalized_file_path}' with commit='{commit_message}' on branch='{ref_to_use}' in repo '{repository_object.full_name}'...")
+        
+        # The create_file method returns a dict with 'content' (ContentFile) and 'commit' (Commit)
+        created_file_info = repository_object.create_file(
+            path=normalized_file_path,
+            message=commit_message,
+            content=content,          
+            branch=ref_to_use
+        )
+        
+        print(f"Successfully created file '{normalized_file_path}' via commit {created_file_info['commit'].sha[:7]}.")
+        return True, None
+    except GithubException as e:
+        # Common statuses: 422 (Unprocessable Entity - often if file exists or path issue)
+        # 409 (Conflict - though create_file usually raises 422 if file exists)
+        error_msg = f"A GitHub API error occurred while creating file '{normalized_file_path}': {e.status} - {e.data.get('message', str(e)) if hasattr(e, 'data') and isinstance(e.data, dict) else str(e)}"
+        print(error_msg)
+        return False, error_msg
+    except Exception as e:
+        error_msg = f"An unexpected error occurred while creating file '{normalized_file_path}': {str(e)}"
+        print(error_msg)
+        return False, error_msg
+
+def update_repository_file(repository_object, file_path: str, commit_message: str, new_content: str, sha: str, branch: str = None) -> tuple[bool, str | None]:
+    """
+    Updates an existing file in a GitHub repository.
+
+    Args:
+        repository_object: An authenticated PyGithub Repository object.
+        file_path (str): The full path of the file to update.
+        commit_message (str): The commit message for the file update.
+        new_content (str): The new content for the file.
+        sha (str): The blob SHA of the file being replaced.
+        branch (str, optional): The name of the branch where the file will be updated.
+                                Defaults to None, which means PyGithub will use
+                                the repository's default branch.
+
+    Returns:
+        tuple[bool, str | None]: A tuple containing:
+            - bool: True if the file was updated successfully, False otherwise.
+            - str: An error message string if an error occurred, otherwise None.
+    """
+    if not repository_object:
+        return False, "Repository object is not initialized."
+    if not file_path:
+        return False, "File path cannot be empty."
+    if not commit_message:
+        return False, "Commit message cannot be empty."
+    if not sha:
+        return False, "File SHA (blob SHA) is required for an update."
+
+    try:
+        normalized_file_path = file_path.strip('/')
+        ref_to_use = branch if branch else repository_object.default_branch
+
+        print(f"Attempting to update file='{normalized_file_path}' with commit='{commit_message}' on branch='{ref_to_use}' (SHA: {sha[:7]})...")
+        
+        updated_file_info = repository_object.update_file(
+            path=normalized_file_path,
+            message=commit_message,
+            content=new_content,
+            sha=sha,
+            branch=ref_to_use
+        )
+        
+        print(f"Successfully updated file '{normalized_file_path}' via commit {updated_file_info['commit'].sha[:7]}.")
+        return True, None
+    except GithubException as e:
+        # Common statuses: 404 (Not Found - if file or SHA is wrong), 409 (Conflict - if SHA doesn't match current file state)
+        error_msg = f"A GitHub API error occurred while updating file '{normalized_file_path}': {e.status} - {e.data.get('message', str(e)) if hasattr(e, 'data') and isinstance(e.data, dict) else str(e)}"
+        print(error_msg)
+        return False, error_msg
+    except Exception as e:
+        error_msg = f"An unexpected error occurred while updating file '{normalized_file_path}': {str(e)}"
+        print(error_msg)
+        return False, error_msg
+
+def delete_repository_file(repository_object, file_path: str, commit_message: str, sha: str, branch: str = None) -> tuple[bool, str | None]:
+    """
+    Deletes a file from a GitHub repository.
+
+    Args:
+        repository_object: An authenticated PyGithub Repository object.
+        file_path (str): The full path of the file to delete.
+        commit_message (str): The commit message for the file deletion.
+        sha (str): The blob SHA of the file being deleted.
+        branch (str, optional): The name of the branch from which the file will be deleted.
+                                Defaults to None, which means PyGithub will use
+                                the repository's default branch.
+
+    Returns:
+        tuple[bool, str | None]: A tuple containing:
+            - bool: True if the file was deleted successfully, False otherwise.
+            - str: An error message string if an error occurred, otherwise None.
+    """
+    if not repository_object:
+        return False, "Repository object is not initialized."
+    if not file_path:
+        return False, "File path cannot be empty."
+    if not commit_message:
+        return False, "Commit message cannot be empty."
+    if not sha:
+        return False, "File SHA (blob SHA) is required for deletion."
+
+    try:
+        normalized_file_path = file_path.strip('/')
+        ref_to_use = branch if branch else repository_object.default_branch
+
+        print(f"Attempting to delete file='{normalized_file_path}' with commit='{commit_message}' on branch='{ref_to_use}' (SHA: {sha[:7]})...")
+        
+        deleted_file_info = repository_object.delete_file(
+            path=normalized_file_path,
+            message=commit_message,
+            sha=sha,
+            branch=ref_to_use
+        )
+        print(f"Successfully deleted file '{normalized_file_path}' via commit {deleted_file_info['commit'].sha[:7]}.")
+        return True, None
+    except GithubException as e:
+        # Common statuses: 404 (Not Found - if file or SHA is wrong), 409 (Conflict - if SHA doesn't match current file state)
+        error_msg = f"A GitHub API error occurred while deleting file '{normalized_file_path}': {e.status} - {e.data.get('message', str(e)) if hasattr(e, 'data') and isinstance(e.data, dict) else str(e)}"
+        print(error_msg)
+        return False, error_msg
+    except Exception as e:
+        error_msg = f"An unexpected error occurred while deleting file '{normalized_file_path}': {str(e)}"
+        print(error_msg)
+        return False, error_msg
+
 if __name__ == "__main__":
     print("github_client.py module loaded.")
     print("This module provides functions to interact with GitHub.")
-    print("To test list_repository_contents, you need an authenticated Repository object,")
-    print("typically managed and passed by the GithubAgent. Same for read_repository_file.")
+    print("To test functions here, you need an authenticated Repository object,")
+    print("typically managed and passed by the GithubAgent.")
