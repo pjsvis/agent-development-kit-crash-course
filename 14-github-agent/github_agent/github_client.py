@@ -56,7 +56,7 @@ def list_repository_contents(repository_object, path: str = "", branch: str = No
         print(error_msg)
         return [], error_msg
 
-def read_repository_file(repository_object, file_path: str, branch: str = None) -> tuple[str | None, str | None]:
+def read_repository_file(repository_object, file_path: str, branch: str = None) -> tuple[str | None, str | None, str | None]:
     """
     Reads the content of a specific file in a GitHub repository.
 
@@ -68,15 +68,16 @@ def read_repository_file(repository_object, file_path: str, branch: str = None) 
                                 the repository's default branch.
 
     Returns:
-        tuple[str | None, str | None]: A tuple containing:
-            - str: The decoded content of the file if successful.
-            - str: An error message string if an error occurred, otherwise None.
-            Returns (None, error_message) on failure.
+        tuple[str | None, str | None, str | None]: A tuple containing:
+            - str | None: The decoded content of the file if successful.
+            - str | None: The SHA of the file if successful.
+            - str | None: An error message string if an error occurred, otherwise None.
+            Returns (None, None, error_message) on failure.
     """
     if not repository_object:
-        return None, "Repository object is not initialized."
+        return None, None, "Repository object is not initialized."
     if not file_path:
-        return None, "File path cannot be empty."
+        return None, None, "File path cannot be empty."
 
     try:
         # Normalize path: remove leading/trailing slashes as get_contents handles it
@@ -89,27 +90,28 @@ def read_repository_file(repository_object, file_path: str, branch: str = None) 
         if content_file.type == 'dir':
             error_msg = f"Error: Path '{normalized_file_path}' is a directory, not a file."
             print(error_msg)
-            return None, error_msg
+            return None, None, error_msg
         
         decoded_content = content_file.decoded_content.decode('utf-8')
-        print(f"Successfully read file '{normalized_file_path}'. Content length: {len(decoded_content)} bytes.")
-        return decoded_content, None
+        file_sha = content_file.sha
+        print(f"Successfully read file '{normalized_file_path}'. SHA: {file_sha[:7]}, Content length: {len(decoded_content)} bytes.")
+        return decoded_content, file_sha, None
     except UnknownObjectException:
         error_msg = f"Error: File '{normalized_file_path}' not found in repository on branch '{ref_to_use}'."
         print(error_msg)
-        return None, error_msg
+        return None, None, error_msg
     except RateLimitExceededException:
         error_msg = "GitHub API rate limit exceeded. Please try again later."
         print(error_msg)
-        return None, error_msg
+        return None, None, error_msg
     except GithubException as e: # Catch other PyGithub specific errors
         error_msg = f"A GitHub API error occurred while reading file '{normalized_file_path}': {e.status} - {e.data.get('message', str(e)) if hasattr(e, 'data') and isinstance(e.data, dict) else str(e)}"
         print(error_msg)
-        return None, error_msg
+        return None, None, error_msg
     except Exception as e:
         error_msg = f"An unexpected error occurred while reading file '{normalized_file_path}': {str(e)}"
         print(error_msg)
-        return None, error_msg
+        return None, None, error_msg
 
 def create_repository_file(repository_object, file_path: str, commit_message: str, content: str, branch: str = None) -> tuple[bool, str | None]:
     """
