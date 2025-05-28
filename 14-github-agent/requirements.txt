@@ -1,0 +1,3 @@
+python-dotenv
+# PyGithub will be added here
+# GitPython will be added here

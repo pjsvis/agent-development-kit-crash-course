@@ -1,4 +1,25 @@
-.env
-__pycache__/
+# Environment variables
+**/.env
+
+# Python cache files
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+
+# Virtual environment (if created within 14-github-agent or github_agent)
+venv/
+env/
 .venv/
-*.db
+**/venv/
+**/env/
+**/.venv/
+
+# IDE and editor specific files
+.vscode/
+.idea/
+**/.vscode/
+**/.idea/
+**/*.swp
+
+
