@@ -115,7 +115,7 @@ def create_file_tool(file_path: str, commit_message: str, content: str, branch: 
     Args:
         file_path (str): The full path for the new file.
         commit_message (str): The commit message for the file creation.
-        content (str): The content of the new file.
+        content (str): The content of the new file. This must be the plain text content intended for the file.
         branch (Optional[str], optional): The branch where the file will be created. If not provided, uses the repository's default branch.
     Returns:
         dict: A dictionary with 'status', 'result', and 'error_message'.
@@ -137,7 +137,7 @@ def update_file_tool(file_path: str, commit_message: str, new_content: str, sha:
     Args:
         file_path (str): The full path of the file to update.
         commit_message (str): The commit message for the file update.
-        new_content (str): The new content for the file.
+        new_content (str): The new content for the file. This must be the new plain text content for the file.
         sha (str): The blob SHA of the file being replaced (obtained from read_file_tool).
         branch (Optional[str], optional): The branch where the file will be updated. If not provided, uses the repository's default branch.
     Returns:
@@ -197,12 +197,12 @@ Available Tools:
 3. `create_file_tool(file_path: str, commit_message: str, content: str, branch: Optional[str])`: Creates a new file.
    - `file_path`: Required.
    - `commit_message`: Required.
-   - `content`: Required.
+   - `content`: Required. This must be the plain text content intended for the file.
    - `branch`: Optional. If not provided, uses the repository's default branch.
 4. `update_file_tool(file_path: str, commit_message: str, new_content: str, sha: str, branch: Optional[str])`: Updates an existing file.
    - `file_path`: Required.
    - `commit_message`: Required.
-   - `new_content`: Required.
+   - `new_content`: Required. This must be the new plain text content for the file.
    - `sha`: Required. The current SHA of the file (use `read_file_tool` to get this from the 'sha' field of its result).
    - `branch`: Optional. If not provided, uses the repository's default branch.
 5. `delete_file_tool(file_path: str, commit_message: str, sha: str, branch: Optional[str])`: Deletes a file.
@@ -226,7 +226,8 @@ Always be polite and helpful.
 
 agent = Agent(
     name="github_agent", # Must match the parent folder name for ADK discovery
-    model="gemini-1.5-flash-latest", # Or "gemini-1.0-pro", or other suitable model
+    # model="gemini-1.5-flash-latest", # Or "gemini-1.0-pro", or other suitable model
+    model="gemini-2.5-pro-preview-03-25",
     description="An agent that interacts with a pre-configured GitHub repository using specific tools.",
     instruction=_AGENT_INSTRUCTION,
     tools=[
