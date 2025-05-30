@@ -227,7 +227,7 @@ Always be polite and helpful.
 agent = Agent(
     name="github_agent", # Must match the parent folder name for ADK discovery
     # model="gemini-1.5-flash-latest", # Or "gemini-1.0-pro", or other suitable model
-    model="gemini-2.5-pro-preview-03-25",
+    model="gemini-2.5-flash",
     description="An agent that interacts with a pre-configured GitHub repository using specific tools.",
     instruction=_AGENT_INSTRUCTION,
     tools=[

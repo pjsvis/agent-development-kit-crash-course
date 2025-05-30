@@ -4,27 +4,27 @@ ADK supports several Gemini models with different capabilities and price points.
 
 ## Model Capabilities
 
-| Model | Description | Input Types | Best For |
-|-------|-------------|-------------|----------|
-| gemini-2.5-pro | Most powerful thinking model with maximum response accuracy | Audio, images, video, text | Complex coding, reasoning, multimodal understanding |
-| gemini-2.5-flash | Best price-performance balance | Audio, images, video, text | Low latency, high volume tasks that require thinking |
-| gemini-2.0-flash | Newest multimodal model with improved capabilities | Audio, images, video, text | Low latency, enhanced performance, agentic experiences |
-| gemini-2.0-flash-lite | Optimized for efficiency and speed | Audio, images, video, text | Cost efficiency and low latency |
-| gemini-1.5-flash | Versatile performance across diverse tasks | Audio, images, video, text | Fast and versatile performance |
-| gemini-1.5-flash-8b | Smaller, faster model | Audio, images, video, text | High volume and lower intelligence tasks |
-| gemini-1.5-pro | Powerful reasoning capabilities | Audio, images, video, text | Complex reasoning tasks requiring more intelligence |
+| Model                 | Description                                                 | Input Types                | Best For                                               |
+| --------------------- | ----------------------------------------------------------- | -------------------------- | ------------------------------------------------------ |
+| gemini-2.5-pro        | Most powerful thinking model with maximum response accuracy | Audio, images, video, text | Complex coding, reasoning, multimodal understanding    |
+| gemini-2.5-flash      | Best price-performance balance                              | Audio, images, video, text | Low latency, high volume tasks that require thinking   |
+| gemini-2.0-flash      | Newest multimodal model with improved capabilities          | Audio, images, video, text | Low latency, enhanced performance, agentic experiences |
+| gemini-2.0-flash-lite | Optimized for efficiency and speed                          | Audio, images, video, text | Cost efficiency and low latency                        |
+| gemini-1.5-flash      | Versatile performance across diverse tasks                  | Audio, images, video, text | Fast and versatile performance                         |
+| gemini-1.5-flash-8b   | Smaller, faster model                                       | Audio, images, video, text | High volume and lower intelligence tasks               |
+| gemini-1.5-pro        | Powerful reasoning capabilities                             | Audio, images, video, text | Complex reasoning tasks requiring more intelligence    |
 
 ## Pricing
 
-| Model | Input Price | Output Price |
-|-------|-------------|-------------|
-| gemini-2.5-pro | $10.00 / 1M tokens | $30.00 / 1M tokens |
-| gemini-2.5-flash | $3.50 / 1M tokens | $10.50 / 1M tokens |
-| gemini-2.0-flash | $3.50 / 1M tokens | $10.50 / 1M tokens |
-| gemini-2.0-flash-lite | $0.70 / 1M tokens | $2.10 / 1M tokens |
-| gemini-1.5-flash | $2.50 / 1M tokens | $7.50 / 1M tokens |
-| gemini-1.5-flash-8b | $0.35 / 1M tokens | $1.05 / 1M tokens |
-| gemini-1.5-pro | $7.00 / 1M tokens | $21.00 / 1M tokens |
+| Model                 | Input Price        | Output Price       |
+| --------------------- | ------------------ | ------------------ |
+| gemini-2.5-pro        | $10.00 / 1M tokens | $30.00 / 1M tokens |
+| gemini-2.5-flash      | $3.50 / 1M tokens  | $10.50 / 1M tokens |
+| gemini-2.0-flash      | $3.50 / 1M tokens  | $10.50 / 1M tokens |
+| gemini-2.0-flash-lite | $0.70 / 1M tokens  | $2.10 / 1M tokens  |
+| gemini-1.5-flash      | $2.50 / 1M tokens  | $7.50 / 1M tokens  |
+| gemini-1.5-flash-8b   | $0.35 / 1M tokens  | $1.05 / 1M tokens  |
+| gemini-1.5-pro        | $7.00 / 1M tokens  | $21.00 / 1M tokens |
 
 ## Token Information
 
@@ -42,3 +42,34 @@ ADK supports several Gemini models with different capabilities and price points.
 ## Additional Resources
 
 For the most up-to-date information on Gemini models, visit the [official Gemini API documentation](https://ai.google.dev/gemini-api/docs/models).
+
+
+---
+
+## What is Gemma 3?
+
+Gemma 3 is Google's latest iteration of open weight LLMs. It comes in four sizes, 1 billion, 4 billion, 12 billion, and 27 billion parameters with base (pre-trained) and instruction-tuned versions. Gemma 3 goes multimodal! The 4, 12, and 27 billion parameter models can process both images and text, while the 1B variant is text only.
+
+The input context window length has been increased from Gemma 2’s 8k to 32k for the 1B variants, and 128k for all others. As is the case with other VLMs (vision-language models), Gemma 3 generates text in response to the user inputs, which may consist of text and, optionally, images. Example uses include question answering, analyzing image content, summarizing documents, etc.
+
+```
+Pre Trained	Instruction Tuned	Multimodal	Multilingual	Input Context Window
+gemma-3-1b-pt	gemma-3-1b-it	❌	English	32K
+gemma-3-4b-pt	gemma-3-4b-it	✅	+140 languages	128K
+gemma-3-12b-pt	gemma-3-12b-it	✅	+140 languages	128K
+gemma-3-27b-pt	gemma-3-27b-it	✅	+140 languages	128K
+While these are multimodal models, one can use it as a text only model (as an LLM) without loading the vision encoder in memory. We will talk about this in more detail later in the inference section.
+```
+Technical Enhancements in Gemma 3
+The three core enhancements in Gemma 3 over Gemma 2 are:
+
+- Longer context length
+- Multimodality
+- Multilinguality
+
+In this section, we will cover the technical details that lead to these enhancements. It is interesting to start with the knowledge of Gemma 2 and explore what was necessary to make these models even better. This exercise will help you think like the Gemma team and appreciate the details!
+
+Longer Context Length
+Scaling context length to 128k tokens could be achieved efficiently without training models from scratch. Instead, models are pretrained with 32k sequences, and only the 4B, 12B, and 27B models are scaled to 128k tokens at the end of pretraining, saving significant compute. Positional embeddings, like RoPE, are adjusted—upgraded from a 10k base frequency in Gemma 2 to 1M in Gemma 3—and scaled by a factor of 8 for longer contexts.
+
+KV Cache management is optimized using Gemma 2’s sliding window interleaved attention. Hyperparameters are tuned to interleave 5 local layers with 1 global layer (previously 1:1) and reduce the window size to 1024 tokens (down from 4096). Crucially, memory savings are achieved without degrading perplexity.
